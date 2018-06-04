@@ -299,7 +299,7 @@ DSNDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 BOOL INSTAPI
 ConfigDSN(HWND hwndParent, WORD fRequest, LPCSTR lpszDriver, LPCSTR lpszAttributes)
 {
-	int result;
+	INT_PTR result;
 	DSNINFO *di;
 	const char *errmsg;
 
@@ -407,7 +407,7 @@ ConfigDriver(HWND hwndParent, WORD fRequest, LPCSTR lpszDriver, LPCSTR lpszArgs,
 
 	if (msg && lpszMsg && cbMsgMax > strlen(msg)) {
 		strcpy(lpszMsg, msg);
-		*pcbMsgOut = strlen(msg);
+		*pcbMsgOut = (WORD) strlen(msg);
 	}
 	return TRUE;
 }
