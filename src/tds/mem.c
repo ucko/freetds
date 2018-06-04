@@ -813,7 +813,7 @@ tds_init_login(TDSLOGIN *login, TDSLOCALE * locale)
 	 * Change to initial language must succeed.
 	 */
 	login->option_flag2 = TDS_INIT_LANG_REQUIRED|TDS_ODBC_ON;
-	login->tds_version = TDS_DEFAULT_VERSION;
+	login->tds_version = 0 /* was TDS_DEFAULT_VERSION */;
 	login->block_size = 0;
 
 #if HAVE_NL_LANGINFO && defined(CODESET)

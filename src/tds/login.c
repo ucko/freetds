@@ -370,10 +370,8 @@ tds_connect(TDSSOCKET * tds, TDSLOGIN * login, int *p_oserr)
 	 * We try them in an order that should work. 
 	 */
 	const static TDS_USMALLINT versions[] =
-		{ 0x704
-		, 0x703
-		, 0x702
-		, 0x701
+		{ /* 0x704, 0x703, 0x702, */
+		  0x701
 		, 0x500
 		};
 
@@ -398,12 +396,16 @@ tds_connect(TDSSOCKET * tds, TDSLOGIN * login, int *p_oserr)
 		mod_ctx->err_handler = NULL;
 
 		for (i = 0; i < TDS_VECTOR_SIZE(versions); ++i) {
+			int orig_size = tds->conn->env.block_size;
 			login->tds_version = versions[i];
 			reset_save_context(&save_ctx);
 
 			erc = tds_connect(tds, login, p_oserr);
 			if (TDS_FAILED(erc)) {
 				tds_close_socket(tds);
+				if (tds->conn->env.block_size != orig_size) {
+					tds_realloc_socket(tds, orig_size);
+				}
 			}
 			
 			if (erc != -TDSEFCON)	/* TDSEFCON indicates wrong TDS version */
