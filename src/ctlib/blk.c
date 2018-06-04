@@ -267,6 +267,9 @@ blk_done(CS_BLKDESC * blkdesc, CS_INT type, CS_INT * outrow)
 		blkdesc->bcpinfo.direction = 0;
 		blkdesc->bcpinfo.bind_count = CS_UNUSED;
 		blkdesc->bcpinfo.xfer_init = 0;
+		blkdesc->bcpinfo.text_sent = 0;
+		blkdesc->bcpinfo.next_col = 0;
+		blkdesc->bcpinfo.blob_cols = 0;
 
 		break;
 
@@ -471,10 +474,36 @@ blk_srvinit(SRV_PROC * srvproc, CS_BLKDESC * blkdescp)
 CS_RETCODE
 blk_textxfer(CS_BLKDESC * blkdesc, CS_BYTE * buffer, CS_INT buflen, CS_INT * outlen)
 {
-	tdsdump_log(TDS_DBG_FUNC, "blk_textxfer(%p, %p, %d, %p)\n", blkdesc, buffer, buflen, outlen);
+	TDSSOCKET *tds;
+	TDSCOLUMN *bindcol;
 
-	tdsdump_log(TDS_DBG_FUNC, "UNIMPLEMENTED blk_textxfer()\n");
-	return CS_FAIL;
+	if (blkdesc == NULL  ||  buffer == NULL) {
+		return CS_FAIL;
+	}
+
+	tds = CONN(blkdesc)->tds_socket;
+
+	bindcol = blkdesc->bcpinfo.bindinfo->columns
+		[blkdesc->bcpinfo.next_col-1];
+
+	if (bindcol->column_varaddr != NULL) {
+		return CS_FAIL;
+	}
+
+	bindcol->column_cur_size = buflen;
+	bindcol->column_lenbind = &bindcol->column_cur_size;
+	bindcol->column_varaddr = (TDS_CHAR*) buffer;
+
+	if (TDS_FAILED(tds_bcp_send_record(tds, &blkdesc->bcpinfo,
+					   _blk_get_col_data, _blk_null_error,
+					   0))) {
+		return CS_FAIL;
+	} else if (blkdesc->bcpinfo.next_col == 0) {
+		return CS_END_DATA; /* all done */
+	} else {
+		bindcol->column_varaddr = NULL;
+		return CS_SUCCEED; /* still need more data */
+	}
 }
 
 static CS_RETCODE
@@ -571,6 +600,8 @@ _blk_rowxfer_in(CS_BLKDESC * blkdesc, CS_INT rows_to_xfer, CS_INT * rows_xferred
 
 	if (blkdesc->bcpinfo.xfer_init == 0) {
 
+		blkdesc->bcpinfo.xfer_init = 1;
+
 		/*
 		 * first call the start_copy function, which will
 		 * retrieve details of the database table columns
@@ -578,16 +609,19 @@ _blk_rowxfer_in(CS_BLKDESC * blkdesc, CS_INT rows_to_xfer, CS_INT * rows_xferred
 
 		if (TDS_FAILED(tds_bcp_start_copy_in(tds, &blkdesc->bcpinfo))) {
 			_ctclient_msg(CONN(blkdesc), "blk_rowxfer", 2, 5, 1, 140, "");
+			blkdesc->bcpinfo.xfer_init = 0;
 			return CS_FAIL;
 		}
-
-		blkdesc->bcpinfo.xfer_init = 1;
 	} 
 
 	for (each_row = 0; each_row < rows_to_xfer; each_row++ ) {
 
 		if (tds_bcp_send_record(tds, &blkdesc->bcpinfo, _blk_get_col_data, _blk_null_error, each_row) == TDS_SUCCESS) {
-			/* FIXME */
+			if (blkdesc->bcpinfo.next_col > 0) {
+				return CS_BLK_HAS_TEXT;
+			}
+		} else {
+			return CS_FAIL;
 		}
 	}
 
@@ -622,19 +656,6 @@ _blk_get_col_data(TDSBCPINFO *bulk, TDSCOLUMN *bindcol, int offset)
 
 	tdsdump_log(TDS_DBG_FUNC, "_blk_get_col_data(%p, %p, %d)\n", bulk, bindcol, offset);
 
-	/*
-	 * Retrieve the initial bound column_varaddress
-	 * and increment it if offset specified
-	 */
-
-	src = (unsigned char *) bindcol->column_varaddr;
-	if (!src) {
-		tdsdump_log(TDS_DBG_ERROR, "error source field not addressable\n");
-		return TDS_FAIL;
-	}
-
-	src += offset * bindcol->column_bindlen;
-	
 	if (bindcol->column_nullbind) {
 		nullind = bindcol->column_nullbind;
 		nullind += offset;
@@ -644,6 +665,32 @@ _blk_get_col_data(TDSBCPINFO *bulk, TDSCOLUMN *bindcol, int offset)
 		datalen += offset;
 	}
 
+	/*
+	 * Retrieve the initial bound column_varaddress
+	 * and increment it if offset specified
+	 */
+
+	src = (unsigned char *) bindcol->column_varaddr;
+	if (!src) {
+		if (nullind  &&  *nullind == -1) {
+			null_column = 1;
+		}
+
+		bindcol->bcp_column_data->datalen = *datalen;
+		bindcol->bcp_column_data->is_null = null_column;
+
+		if (/* null_column == 0  && */
+		    is_blob_type(bindcol->column_type)
+		    &&  bindcol->column_varaddr == NULL) {
+			/* Data will come piecemeal, via blk_textxfer. */
+			return CS_BLK_HAS_TEXT;
+		}
+
+		tdsdump_log(TDS_DBG_ERROR, "error source field not addressable\n");
+		return TDS_FAIL;
+	}
+
+	src += offset * bindcol->column_bindlen;
 	srctype = bindcol->column_bindtype; 		/* passes to cs_convert */
 
 	tdsdump_log(TDS_DBG_INFO1, "blk_get_col_data srctype = %d\n", srctype);
@@ -683,7 +730,7 @@ _blk_get_col_data(TDSBCPINFO *bulk, TDSCOLUMN *bindcol, int offset)
 			null_column = 1;
 	}
 
-	if (!null_column) {
+	if (!null_column  &&  !is_blob_type(bindcol->column_type)) {
 		CONV_RESULT convert_buffer;
 
 		srcfmt.datatype = srctype;
