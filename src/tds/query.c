@@ -31,6 +31,10 @@
 #include <string.h>
 #endif /* HAVE_STRING_H */
 
+#if HAVE_SYS_SOCKET_H
+#include <sys/socket.h>
+#endif /* HAVE_SYS_SOCKET_H */
+
 #include <ctype.h>
 
 #include <freetds/tds.h>
@@ -120,7 +124,8 @@ tds_ascii_to_ucs2(char *buffer, const char *buf)
  * \return string allocated (or input pointer if no conversion required) or NULL if error
  */
 const char *
-tds_convert_string(TDSSOCKET * tds, TDSICONV * char_conv, const char *s, int len, size_t *out_len)
+tds_convert_string(TDSSOCKET * tds, TDSICONV * char_conv, const char *s,
+		   ssize_t len, size_t *out_len)
 {
 	char *buf;
 
@@ -416,7 +421,9 @@ tds_submit_query_params(TDSSOCKET * tds, const char *query, TDSPARAMINFO * param
 		size_t converted_query_len;
 		const char *converted_query;
  
-		converted_query = tds_convert_string(tds, tds->conn->char_convs[client2ucs2], query, (int)query_len, &converted_query_len);
+		converted_query = tds_convert_string
+		    (tds, tds->conn->char_convs[client2ucs2],
+		     query, query_len, &converted_query_len);
 		if (!converted_query) {
 			tds_set_state(tds, TDS_IDLE);
 			return TDS_FAIL;
@@ -749,7 +756,7 @@ tds_get_column_declaration(TDSSOCKET * tds, TDSCOLUMN * curcol, char *out)
 	CHECK_TDS_EXTRA(tds);
 	CHECK_COLUMN_EXTRA(curcol);
 
-	size = tds_fix_column_size(tds, curcol);
+	size = (unsigned int) tds_fix_column_size(tds, curcol);
 
 	switch (tds_get_conversion_type(curcol->on_server.column_type, curcol->on_server.column_size)) {
 	case XSYBCHAR:
@@ -1631,7 +1638,7 @@ tds_put_data_info(TDSSOCKET * tds, TDSCOLUMN * curcol, int flags)
 		tds_put_byte(tds, curcol->column_output);	/* status (input) */
 	if (!IS_TDS7_PLUS(tds->conn))
 		tds_put_int(tds, curcol->column_usertype);	/* usertype */
-	tds_put_byte(tds, curcol->on_server.column_type);
+	tds_put_byte(tds, (unsigned char) curcol->on_server.column_type);
 
 	if (curcol->funcs->put_info(tds, curcol) != TDS_SUCCESS)
 		return TDS_FAIL;
@@ -2259,7 +2266,7 @@ tds_quote(TDSSOCKET * tds, char *buffer, char quoting, const char *id, size_t le
  * \result written chars (not including needed terminator)
  */
 size_t
-tds_quote_id(TDSSOCKET * tds, char *buffer, const char *id, int idlen)
+tds_quote_id(TDSSOCKET * tds, char *buffer, const char *id, ssize_t idlen)
 {
 	size_t i, len;
 
@@ -2303,7 +2310,7 @@ tds_quote_id(TDSSOCKET * tds, char *buffer, const char *id, int idlen)
  * \result written chars (not including needed terminator)
  */
 size_t
-tds_quote_string(TDSSOCKET * tds, char *buffer, const char *str, int len)
+tds_quote_string(TDSSOCKET * tds, char *buffer, const char *str, ssize_t len)
 {
 	return tds_quote(tds, buffer, '\'', str, len < 0 ? strlen(str) : (size_t) len);
 }
@@ -2410,8 +2417,9 @@ tds_cursor_open(TDSSOCKET * tds, TDSCURSOR * cursor, TDSPARAMINFO *params, int *
 		int num_params = params ? params->num_cols : 0;
 
 		/* cursor statement */
-		converted_query = tds_convert_string(tds, tds->conn->char_convs[client2ucs2],
-						     cursor->query, (int)strlen(cursor->query), &converted_query_len);
+		converted_query = tds_convert_string
+		    (tds, tds->conn->char_convs[client2ucs2], cursor->query,
+		     strlen(cursor->query), &converted_query_len);
 		if (!converted_query) {
 			if (!*something_to_send)
 				tds_set_state(tds, TDS_IDLE);
@@ -3019,9 +3027,10 @@ tds_cursor_update(TDSSOCKET * tds, TDSCURSOR * cursor, TDS_CURSOR_OPERATION op, 
 				}
 			}
 			if (table_name) {
-				converted_table =
-					tds_convert_string(tds, tds->conn->char_convs[client2ucs2], 
-							   table_name, (int)strlen(table_name), &converted_table_len);
+				converted_table = tds_convert_string
+				    (tds, tds->conn->char_convs[client2ucs2],
+				     table_name, strlen(table_name),
+				     &converted_table_len);
 				if (!converted_table) {
 					/* FIXME not here, in the middle of a packet */
 					tds_set_state(tds, TDS_IDLE);

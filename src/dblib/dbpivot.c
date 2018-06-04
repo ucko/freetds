@@ -90,7 +90,7 @@ struct col_t
 static TDS_SERVER_TYPE infer_col_type(int sybtype);
 
 static struct col_t *
-col_init(struct col_t *pcol, int sybtype, int collen) 
+col_init(struct col_t *pcol, int sybtype, size_t collen)
 {
 	assert(pcol);
 	
@@ -172,6 +172,9 @@ col_equal(const struct col_t *pc1, const struct col_t *pc2)
 	case SYBDATETIMN:
 		assert( false && pc1->type );
 		break;
+
+	default:
+		return false;
 	}
 	return false;
 }
@@ -215,6 +218,9 @@ col_buffer(struct col_t *pcol)
 	case SYBDATETIMN:
 		assert( false && pcol->type );
 		break;
+
+	default:
+		return NULL;
 	}
 	return NULL;
 
@@ -645,7 +651,7 @@ agg_equal(const AGG_T *p1, const AGG_T *p2)
 #define tds_alloc_column() ((TDSCOLUMN*) calloc(1, sizeof(TDSCOLUMN)))
 
 static TDSRESULTINFO *
-alloc_results(size_t num_cols)
+alloc_results(TDS_USMALLINT num_cols)
 {
 	TDSRESULTINFO *res_info;
 	TDSCOLUMN **ppcol;
@@ -708,7 +714,8 @@ struct metadata_t { KEY_T *pacross; char *name; struct col_t col; };
 
 
 static bool
-reinit_results(TDSSOCKET * tds, size_t num_cols, const struct metadata_t meta[])
+reinit_results(TDSSOCKET * tds, TDS_USMALLINT num_cols,
+	       const struct metadata_t meta[])
 {
 	TDSRESULTINFO *info;
 	int i;
@@ -770,7 +777,8 @@ typedef struct pivot_t
 	
 	AGG_T *output;
 	KEY_T *across;
-	size_t nout, nacross;
+	size_t nout;
+	TDS_USMALLINT nacross;
 } PIVOT_T;
 
 static bool
@@ -844,8 +852,10 @@ dbnextrow_pivoted(DBPROCESS *dbproc, PIVOT_T *pp)
 		} else {
 			AGG_T *pcan;
 			key_cpy(&candidate.col_key, (KEY_T *) pcol->bcp_terminator);
-			if ((pcan = tds_find(&candidate, pout, pp->output + pp->nout - pout, 
-						sizeof(*pp->output), (compare_func) agg_next)) != NULL) {
+			if ((pcan = (AGG_T *) tds_find
+			     (&candidate, pout, pp->output + pp->nout - pout,
+			      sizeof(*pp->output), (compare_func) agg_next))
+			    != NULL) {
 				/* flag this output as used */
 				pout->row_key.keys = NULL;
 				pval = &pcan->value;
@@ -874,11 +884,11 @@ dbnextrow_pivoted(DBPROCESS *dbproc, PIVOT_T *pp)
 		}
 #endif		
 		pcol->column_size = pval->len;
-		pcol->column_data = col_buffer(pval);
+		pcol->column_data = (unsigned char *) col_buffer(pval);
 		
 		copy_data_to_host_var(	dbproc, 
 					pval->type, 
-					col_buffer(pval), 
+					(BYTE *) col_buffer(pval),
 					pval->len, 
 					(BYTE *) pcol->column_varaddr,  
 					pcol->column_bindlen,
@@ -916,7 +926,8 @@ dbpivot(DBPROCESS *dbproc, int nkeys, int *keys, int ncols, int *cols, DBPIVOT_F
 	PIVOT_T P, *pp;
 	AGG_T input, *pout = NULL;
 	struct metadata_t *metadata, *pmeta;
-	size_t i, nmeta = 0;
+	int i;
+	TDS_USMALLINT nmeta = 0;
 
 	tdsdump_log(TDS_DBG_FUNC, "dbpivot(%p, %d,%p, %d,%p, %p, %d)\n", dbproc, nkeys, keys, ncols, cols, func, val);
 	if (logalot) {
@@ -941,8 +952,10 @@ dbpivot(DBPROCESS *dbproc, int nkeys, int *keys, int ncols, int *cols, DBPIVOT_F
 	memset(&input,  0, sizeof(input));
 	
 	P.dbproc = dbproc;
-	if ((pp = tds_find(&P, pivots, npivots, sizeof(*pivots), (compare_func) pivot_key_equal)) == NULL ) {
-		pp = TDS_RESIZE(pivots, 1 + npivots);
+	if ((pp = (PIVOT_T *) tds_find(&P, pivots, npivots, sizeof(*pivots),
+				       (compare_func) pivot_key_equal))
+	    == NULL) {
+		pp = (PIVOT_T *) TDS_RESIZE(pivots, 1 + npivots);
 		if (!pp)
 			return FAIL;
 		pp += npivots++;
@@ -962,7 +975,9 @@ dbpivot(DBPROCESS *dbproc, int nkeys, int *keys, int ncols, int *cols, DBPIVOT_F
 		
 		if (!col_init(input.row_key.keys+i, type, len))
 			return FAIL;
-		if (FAIL == dbbind(dbproc, keys[i], bind_type(type), input.row_key.keys[i].len, col_buffer(input.row_key.keys+i)))
+		if (FAIL == dbbind(dbproc, keys[i], bind_type(type),
+				   input.row_key.keys[i].len,
+				   (BYTE *) col_buffer(input.row_key.keys+i)))
 			return FAIL;
 		if (FAIL == dbnullbind(dbproc, keys[i], &input.row_key.keys[i].null_indicator))
 			return FAIL;
@@ -978,7 +993,9 @@ dbpivot(DBPROCESS *dbproc, int nkeys, int *keys, int ncols, int *cols, DBPIVOT_F
 		
 		if (!col_init(input.col_key.keys+i, type, len))
 			return FAIL;
-		if (FAIL == dbbind(dbproc, cols[i], bind_type(type), input.col_key.keys[i].len, col_buffer(input.col_key.keys+i)))
+		if (FAIL == dbbind(dbproc, cols[i], bind_type(type),
+				   input.col_key.keys[i].len,
+				   (BYTE *) col_buffer(input.col_key.keys+i)))
 			return FAIL;
 		if (FAIL == dbnullbind(dbproc, cols[i], &input.col_key.keys[i].null_indicator))
 			return FAIL;
@@ -991,7 +1008,9 @@ dbpivot(DBPROCESS *dbproc, int nkeys, int *keys, int ncols, int *cols, DBPIVOT_F
 		
 		if (!col_init(&input.value, type, len))
 			return FAIL;
-		if (FAIL == dbbind(dbproc, val, bind_type(type), input.value.len, col_buffer(&input.value)))
+		if (FAIL == dbbind(dbproc, val, bind_type(type),
+				   input.value.len,
+				   (BYTE *) col_buffer(&input.value)))
 			return FAIL;
 		if (FAIL == dbnullbind(dbproc, val, &input.value.null_indicator))
 			return FAIL;
@@ -999,7 +1018,10 @@ dbpivot(DBPROCESS *dbproc, int nkeys, int *keys, int ncols, int *cols, DBPIVOT_F
 	
 	while ((pp->status = dbnextrow(dbproc)) == REG_ROW) {
 		/* add to unique list of crosstab columns */
-		if (tds_find(&input.col_key, pp->across, pp->nacross, sizeof(*pp->across), (compare_func) key_equal) == NULL) {
+		if ((AGG_T *) tds_find(&input.col_key, pp->across, pp->nacross,
+				       sizeof(*pp->across),
+				       (compare_func) key_equal)
+		    == NULL) {
 			if (!TDS_RESIZE(pp->across, 1 + pp->nacross))
 				return FAIL;
 			key_cpy(pp->across + pp->nacross, &input.col_key);
