@@ -120,6 +120,8 @@ blk_bind(CS_BLKDESC * blkdesc, CS_INT item, CS_DATAFMT * datafmt, CS_VOID * buff
 		colinfo->column_lenbind  = NULL;
 
 		return CS_SUCCEED;
+	} else if (datafmt == NULL) {
+		return CS_FAIL;
 	}
 
 	if (datafmt == NULL)
