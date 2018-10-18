@@ -715,6 +715,9 @@ struct tds_column
 	DSTR column_name;
 	DSTR table_column_name;
 
+	TDS_INT column_def_size;
+	unsigned char* column_default;
+
 	unsigned char *column_data;
 	void (*column_data_free)(struct tds_column *column);
 	unsigned char column_nullable:1;
@@ -724,6 +727,7 @@ struct tds_column
 	unsigned char column_hidden:1;
 	unsigned char column_output:1;
 	unsigned char column_timestamp:1;
+	unsigned char column_hasdefault:1;
 	TDS_UCHAR column_collation[5];
 
 	/* additional fields flags for compute results */
