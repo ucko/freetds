@@ -214,6 +214,7 @@ static int g_dblib_version =
 #else
 	DBVERSION_UNKNOWN;
 #endif
+static int g_dbsetversion_called = 0;
 
 
 static int
@@ -1256,6 +1257,21 @@ tdsdbopen(LOGINREC * login, const char *server, int msdblib)
 	/* override query timeout if dbsettime() was called */
 	if (g_dblib_ctx.query_timeout > 0) {
 		connection->query_timeout = g_dblib_ctx.query_timeout;
+	}
+
+	/* override TDS version if dbsetversion() was called */
+	if (g_dbsetversion_called) {
+		switch (g_dblib_version) {
+		case DBVERSION_42:   connection->tds_version=0x402;  break;
+		case DBVERSION_46:   connection->tds_version=0x406;  break;
+		case DBVERSION_100:  connection->tds_version=0x500;  break;
+		case DBVERSION_70:   connection->tds_version=0x700;  break;
+		case DBVERSION_71:   connection->tds_version=0x701;  break;
+		case DBVERSION_72:   connection->tds_version=0x702;  break;
+		case DBVERSION_73:   connection->tds_version=0x703;  break;
+		case DBVERSION_74:   connection->tds_version=0x704;  break;
+		default:             connection->tds_version=0;      break;
+		};
 	}
 
 	tds_mutex_unlock(&dblib_mutex);
@@ -5955,9 +5971,9 @@ dbgetuserdata(DBPROCESS * dbproc)
  * \ingroup dblib_core
  * \brief Specify a db-lib version level.
  * 
- * \param version anything, really. 
- * \retval SUCCEED Always.  
- * \remarks No effect on behavior of \c db-lib in \c FreeTDS.  
+ * \param version Any DBVERSION_* constant.
+ * \retval SUCCEED if version was valid, FAIL otherwise.
+ * \remarks Use the corresponding protocol version for subsequent connections.
  * \sa 
  */
 RETCODE
@@ -5975,6 +5991,7 @@ dbsetversion(DBINT version)
 	case DBVERSION_73:
 	case DBVERSION_74:
 		g_dblib_version = version;
+		g_dbsetversion_called = 1;
 		return SUCCEED;
 	default:
 		break;
@@ -6583,6 +6600,7 @@ RETCODE
 dbwritetext(DBPROCESS * dbproc, char *objname, DBBINARY * textptr, DBTINYINT textptrlen, DBBINARY * timestamp, DBBOOL log,
 	    DBINT size, BYTE * text)
 {
+	DBINT rc = 0;
 	char textptr_string[35];	/* 16 * 2 + 2 (0x) + 1 */
 	char timestamp_string[19];	/* 8 * 2 + 2 (0x) + 1 */
 	TDS_INT result_type;
@@ -6601,8 +6619,14 @@ dbwritetext(DBPROCESS * dbproc, char *objname, DBBINARY * textptr, DBTINYINT tex
 	if (textptrlen > DBTXPLEN)
 		return FAIL;
 
-	dbconvert(dbproc, SYBBINARY, (BYTE *) textptr, textptrlen, SYBCHAR, (BYTE *) textptr_string, -1);
-	dbconvert(dbproc, SYBBINARY, (BYTE *) timestamp, 8, SYBCHAR, (BYTE *) timestamp_string, -1);
+	rc = dbconvert(dbproc, SYBBINARY, (BYTE *) textptr, textptrlen,
+		       SYBCHAR, (BYTE *) textptr_string, -1);
+	if (rc < 0)
+		return FAIL;
+	rc = dbconvert(dbproc, SYBBINARY, (BYTE *) timestamp, 8, SYBCHAR,
+		       (BYTE *) timestamp_string, -1);
+	if (rc < 0)
+		return FAIL;
 
 	dbproc->dbresults_state = _DB_RES_INIT;
 
