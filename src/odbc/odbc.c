@@ -2329,15 +2329,17 @@ SQLRETURN ODBC_PUBLIC ODBC_API
 SQLDisconnect(SQLHDBC hdbc)
 {
 	int i;
+	struct _hstmt *stmt, *next;
 
 	ODBC_ENTER_HDBC;
 
 	tdsdump_log(TDS_DBG_FUNC, "SQLDisconnect(%p)\n", hdbc);
 
 	/* free all associated statements */
-	while (dbc->stmt_list) {
+	for (stmt = dbc->stmt_list;  stmt != NULL;  stmt = next) {
+		next = stmt->next;
 		tds_mutex_unlock(&dbc->mtx);
-		_SQLFreeStmt(dbc->stmt_list, SQL_DROP, 1);
+		_SQLFreeStmt(stmt, SQL_DROP, 1);
 		tds_mutex_lock(&dbc->mtx);
 	}
 
