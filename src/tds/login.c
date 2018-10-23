@@ -568,7 +568,7 @@ reroute:
 	if (login->text_size || (!db_selected && !tds_dstr_isempty(&login->database))
 	    || tds->conn->spid == -1) {
 		char *str;
-		int len;
+		size_t len;
 
 		len = 128 + tds_quote_id(tds, NULL, tds_dstr_cstr(&login->database),-1);
 		if ((str = tds_new(char, len)) == NULL)
@@ -823,7 +823,7 @@ tds7_send_login(TDSSOCKET * tds, const TDSLOGIN * login)
 	TDS_INT time_zone = -120;
 	TDS_INT tds7version = tds70Version;
 
-	TDS_INT block_size = 4096;
+	unsigned int block_size = 4096;
 	
 	unsigned char option_flag1 = TDS_SET_LANG_ON | TDS_USE_DB_NOTIFY | TDS_INIT_DB_FATAL;
 	unsigned char option_flag2 = login->option_flag2;
@@ -860,7 +860,8 @@ tds7_send_login(TDSSOCKET * tds, const TDSLOGIN * login)
 	};
 	struct {
 		const void *ptr;
-		unsigned pos, len, limit;
+		size_t pos, len;
+		unsigned limit;
 	} data_fields[NUM_DATA_FIELDS], *field;
 
 	tds->out_flag = TDS7_LOGIN;
@@ -1097,7 +1098,7 @@ tds71_do_login(TDSSOCKET * tds, TDSLOGIN* login)
 {
 	int i, pkt_len;
 	const char *instance_name = tds_dstr_isempty(&login->instance_name) ? "MSSQLServer" : tds_dstr_cstr(&login->instance_name);
-	int instance_name_len = strlen(instance_name) + 1;
+	TDS_USMALLINT instance_name_len = strlen(instance_name) + 1;
 	TDS_CHAR crypt_flag;
 	unsigned int start_pos = 21;
 	TDSRET ret;
